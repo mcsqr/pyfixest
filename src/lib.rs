@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 
+mod cluster_bootstrap;
 mod collinear;
 mod crv1;
 mod demean;
@@ -10,6 +11,7 @@ mod nw;
 
 #[pymodule]
 fn _core_impl(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_wrapped(wrap_pyfunction!(cluster_bootstrap::_cluster_bootstrap_rs))?;
     m.add_wrapped(wrap_pyfunction!(collinear::_find_collinear_variables_rs))?;
     m.add_wrapped(wrap_pyfunction!(crv1::_crv1_meat_loop_rs))?;
     m.add_wrapped(wrap_pyfunction!(crv1::_crv1_vcov_loop_qreg_rs))?;

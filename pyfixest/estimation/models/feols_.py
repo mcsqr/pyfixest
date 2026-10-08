@@ -533,6 +533,110 @@ class Feols(ResultAccessorMixin):
         """Publish `_fit_statistics()` as `fitstat`."""
         self.fitstat = self._fit_statistics()
 
+    def cluster_bootstrap(
+        self,
+        cluster_col: str,
+        n_bootstrap: int = 1000,
+        seed: int | None = None,
+        stratify_by: str | None = None,
+        extra_cols: list[str] | None = None,
+        demean_tol: float = 1e-8,
+        demean_maxiter: int = 100_000,
+    ) -> dict[str, np.ndarray | list[str]]:
+        """
+        Run a stratified cluster bootstrap entirely in Rust.
+
+        Each iteration resamples clusters with replacement, re-demeans on the
+        fixed effects, and refits OLS without returning to Python between
+        iterations.
+
+        Parameters
+        ----------
+        cluster_col : str
+            Column in the model data identifying clusters to resample.
+        n_bootstrap : int
+            Number of bootstrap iterations.
+        seed : int, optional
+            Random seed for reproducibility. ``None`` uses seed ``0``.
+        stratify_by : str, optional
+            Column to stratify resampling by (e.g. a treatment group); clusters
+            are resampled within each stratum.
+        extra_cols : list[str], optional
+            Additional columns to average per stratum on each iteration.
+        demean_tol : float
+            Convergence tolerance for fixed-effect demeaning.
+        demean_maxiter : int
+            Maximum number of demeaning iterations.
+
+        Returns
+        -------
+        dict
+            With keys ``"coefs"`` (``np.ndarray`` of shape ``(n_valid, k)``),
+            ``"coefnames"`` (list of coefficient names), and ``"group_means"``
+            (``np.ndarray`` of shape ``(n_valid, n_groups, n_extra)``).
+        """
+        from pyfixest.core.cluster_bootstrap import (
+            cluster_bootstrap as _cluster_bootstrap_rs,
+        )
+
+        Y_raw = self.model_matrix.dependent.to_numpy().flatten().astype(np.float64)
+        X_raw = (
+            self.model_matrix.independent[self._coefnames].to_numpy().astype(np.float64)
+        )
+
+        # fixed_effects holds integer-coded levels; usize matches the Rust kernel.
+        fixed_effects = self.model_matrix.fixed_effects
+        if fixed_effects is not None:
+            fe_arr = fixed_effects.to_numpy().astype(np.uintp)
+        else:
+            fe_arr = np.empty((len(Y_raw), 0), dtype=np.uintp)
+
+        cluster_codes, _ = pd.factorize(self._data[cluster_col])
+        obs_to_cluster = cluster_codes.astype(np.uintp)
+
+        if stratify_by is not None:
+            group_codes, _ = pd.factorize(self._data[stratify_by])
+            obs_to_group = group_codes.astype(np.uintp)
+        else:
+            obs_to_group = np.zeros(len(Y_raw), dtype=np.uintp)
+
+        weight_values = self.observation_weights.values
+        if weight_values is None:
+            weights = np.ones(len(Y_raw), dtype=np.float64)
+        else:
+            weights = np.asarray(weight_values).flatten().astype(np.float64)
+
+        if extra_cols is not None:
+            extra_arr = self._data[extra_cols].to_numpy().astype(np.float64)
+        else:
+            extra_arr = np.empty((len(Y_raw), 0), dtype=np.float64)
+
+        n_groups = int(obs_to_group.max()) + 1
+        n_extra = extra_arr.shape[1]
+
+        coefs, group_means_flat = _cluster_bootstrap_rs(
+            Y_raw,
+            X_raw,
+            fe_arr,
+            obs_to_cluster,
+            obs_to_group,
+            weights,
+            extra_arr,
+            n_bootstrap,
+            seed if seed is not None else 0,
+            demean_tol,
+            demean_maxiter,
+        )
+
+        n_valid = coefs.shape[0]
+        group_means = group_means_flat.reshape(n_valid, n_groups, n_extra)
+
+        return {
+            "coefs": coefs,
+            "coefnames": self._coefnames,
+            "group_means": group_means,
+        }
+
     def _fit_statistics(self) -> FitStatistics:
         """Compute the goodness-of-fit measures of the fitted model.
 

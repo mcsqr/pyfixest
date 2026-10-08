@@ -44,6 +44,19 @@ def _demean_within_rs(
     local_size: int | None = None,
     preconditioner: str | Preconditioner | None = None,
 ) -> tuple[np.ndarray, bool, Preconditioner | None]: ...
+def _cluster_bootstrap_rs(
+    y: NDArray[np.float64],
+    x: NDArray[np.float64],
+    fe: NDArray[np.uintp],
+    obs_to_cluster: NDArray[np.uintp],
+    obs_to_group: NDArray[np.uintp],
+    weights: NDArray[np.float64],
+    extra_cols: NDArray[np.float64],
+    n_bootstrap: int,
+    seed: int,
+    demean_tol: float = 1e-08,
+    demean_maxiter: int = 100_000,
+) -> tuple[np.ndarray, np.ndarray]: ...
 def _count_fixef_fully_nested_all_rs(
     all_fixef_array: NDArray,
     cluster_colnames: NDArray,
